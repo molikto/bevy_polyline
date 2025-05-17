@@ -20,6 +20,7 @@ use bevy::{
         Extract, Render, RenderApp, RenderSet,
     },
 };
+use bytemuck::NoUninit;
 
 pub struct PolylineBasePlugin;
 
@@ -63,9 +64,16 @@ pub struct PolylineBundle {
     pub view_visibility: ViewVisibility,
 }
 
+#[derive(Debug, Default, Copy, Clone, NoUninit)]
+#[repr(C)]
+pub struct Line {
+    pub start: Vec3,
+    pub end: Vec3,
+}
+
 #[derive(Debug, Default, Asset, Clone, TypePath)]
 pub struct Polyline {
-    pub vertices: Vec<Vec3>,
+    pub vertices: Vec<Line>,
 }
 
 #[derive(Debug, Clone, Default, Component)]
@@ -83,7 +91,14 @@ impl RenderAsset for GpuPolyline {
         _: AssetId<Self::SourceAsset>,
         render_device: &mut bevy::ecs::system::SystemParamItem<Self::Param>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
-        let vertex_buffer_data = bytemuck::cast_slice(polyline.vertices.as_slice());
+        let mut buffer = Vec::with_capacity(polyline.vertices.len() * 2);
+        for line in &polyline.vertices {
+            buffer.push(line.start);
+        }
+        for line in &polyline.vertices {
+            buffer.push(line.end);
+        }
+        let vertex_buffer_data = bytemuck::cast_slice(buffer.as_slice());
         let vertex_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             usage: BufferUsages::VERTEX,
             label: Some("Polyline Vertex Buffer"),
@@ -92,7 +107,7 @@ impl RenderAsset for GpuPolyline {
 
         Ok(GpuPolyline {
             vertex_buffer,
-            vertex_count: polyline.vertices.len() as u32,
+            lines_count: polyline.vertices.len() as u32,
         })
     }
 }
@@ -106,7 +121,7 @@ pub struct PolylineUniform {
 #[derive(Debug, Clone)]
 pub struct GpuPolyline {
     pub vertex_buffer: Buffer,
-    pub vertex_count: u32,
+    pub lines_count: u32,
 }
 
 pub fn extract_polylines(
@@ -398,16 +413,15 @@ impl<P: PhaseItem> RenderCommand<P> for DrawPolyline {
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         if let Some(gpu_polyline) = polylines.into_inner().get(&pl_handle.unwrap().0) {
-            if gpu_polyline.vertex_count < 2 {
+            if gpu_polyline.lines_count < 2 {
                 return RenderCommandResult::Success;
             }
 
-            let item_size = VertexFormat::Float32x3.size();
-            let buffer_size = gpu_polyline.vertex_buffer.size() - item_size;
+            let buffer_size = gpu_polyline.vertex_buffer.size() / 2;
             pass.set_vertex_buffer(0, gpu_polyline.vertex_buffer.slice(..buffer_size));
-            pass.set_vertex_buffer(1, gpu_polyline.vertex_buffer.slice(item_size..));
+            pass.set_vertex_buffer(1, gpu_polyline.vertex_buffer.slice(buffer_size..));
 
-            let num_instances = gpu_polyline.vertex_count.max(1) - 1;
+            let num_instances = gpu_polyline.lines_count.max(1) - 1;
             pass.draw(0..6, 0..num_instances);
 
             RenderCommandResult::Success
