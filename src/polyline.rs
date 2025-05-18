@@ -413,7 +413,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawPolyline {
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         if let Some(gpu_polyline) = polylines.into_inner().get(&pl_handle.unwrap().0) {
-            if gpu_polyline.lines_count < 2 {
+            if gpu_polyline.lines_count < 1 {
                 return RenderCommandResult::Success;
             }
 
@@ -421,7 +421,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawPolyline {
             pass.set_vertex_buffer(0, gpu_polyline.vertex_buffer.slice(..buffer_size));
             pass.set_vertex_buffer(1, gpu_polyline.vertex_buffer.slice(buffer_size..));
 
-            let num_instances = gpu_polyline.lines_count.max(1) - 1;
+            let num_instances = gpu_polyline.lines_count;
             pass.draw(0..6, 0..num_instances);
 
             RenderCommandResult::Success
